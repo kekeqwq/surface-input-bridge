@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net11.0-windows</TargetFramework>
+
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+
+    <SelfContained>true</SelfContained>
+
+    <PublishSingleFile>true</PublishSingleFile>
+
+    <PublishTrimmed>false</PublishTrimmed>
+
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
