@@ -63,9 +63,9 @@ The current version is considered **stable and highly usable**.
 
 * [x] Touchpad movement
 * [x] Left button
-* [ ] Right button
-* [ ] Mouse wheel
-* [ ] Additional touchpad gestures
+* [x] Right button
+* [x] Mouse wheel
+* [Don't Need] Additional touchpad gestures
 
 ### Keyboard
 
@@ -394,7 +394,3 @@ The keyboard and mouse paths should remain independent.
 When extending mouse functionality, changes should preferably be limited to
 the Windows Raw Input parser and the corresponding mouse packet handling on
 the Linux receiver.
-
-## License
-
-Choose an appropriate license before publishing this project.
