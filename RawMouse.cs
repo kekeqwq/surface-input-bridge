@@ -23,10 +23,35 @@ class RawMouse
 
 
 
+    // ============================================================
+    // Keep the hidden window alive for the entire lifetime
+    // ============================================================
+
+    static HiddenWindow? window;
+
+    static bool started;
+
+
+
+    // ============================================================
+    // Mouse state
+    // ============================================================
+
+    static bool leftDown;
+
+    static bool rightDown;
+
+
+
+    // ============================================================
+    // RAWINPUT structures
+    // ============================================================
+
     [StructLayout(LayoutKind.Sequential)]
     struct RAWINPUTDEVICE
     {
         public ushort usUsagePage;
+
         public ushort usUsage;
 
         public uint dwFlags;
@@ -40,9 +65,11 @@ class RawMouse
     struct RAWINPUTHEADER
     {
         public uint dwType;
+
         public uint dwSize;
 
         public IntPtr hDevice;
+
         public IntPtr wParam;
     }
 
@@ -55,7 +82,10 @@ class RawMouse
         public ushort usFlags;
 
 
-        // button union
+        // ========================================================
+        // Button union
+        // ========================================================
+
         [FieldOffset(4)]
         public uint ulButtons;
 
@@ -72,6 +102,10 @@ class RawMouse
         public uint ulRawButtons;
 
 
+        // ========================================================
+        // Relative movement
+        // ========================================================
+
         [FieldOffset(12)]
         public int lLastX;
 
@@ -86,27 +120,38 @@ class RawMouse
 
 
 
+    // ============================================================
+    // Raw mouse button flags
+    // ============================================================
+
     const ushort RI_MOUSE_LEFT_BUTTON_DOWN  = 0x0001;
+
     const ushort RI_MOUSE_LEFT_BUTTON_UP    = 0x0002;
 
     const ushort RI_MOUSE_RIGHT_BUTTON_DOWN = 0x0004;
+
     const ushort RI_MOUSE_RIGHT_BUTTON_UP   = 0x0008;
 
     const ushort RI_MOUSE_WHEEL             = 0x0400;
 
 
 
+    // ============================================================
+    // Hidden window
+    // ============================================================
+
     class HiddenWindow : NativeWindow
     {
         public HiddenWindow()
         {
             CreateHandle(
-                new CreateParams()
+                new CreateParams
                 {
                     Caption = "RawMouseBridge"
                 }
             );
         }
+
 
 
         protected override void WndProc(
@@ -115,9 +160,18 @@ class RawMouse
         {
             if(m.Msg == WM_INPUT)
             {
-                Parse(
-                    m.LParam
-                );
+                try
+                {
+                    Parse(
+                        m.LParam
+                    );
+                }
+                catch(Exception ex)
+                {
+                    Console.WriteLine(
+                        $"[RawMouse ERROR] {ex}"
+                    );
+                }
             }
 
 
@@ -129,9 +183,27 @@ class RawMouse
 
 
 
+    // ============================================================
+    // Start
+    // ============================================================
+
     public static void Start()
     {
-        var window = new HiddenWindow();
+        if(started)
+        {
+            Console.WriteLine(
+                "RawMouse already started"
+            );
+
+            return;
+        }
+
+
+
+        // Keep this object alive.
+        window =
+            new HiddenWindow();
+
 
 
         bool ok =
@@ -139,9 +211,14 @@ class RawMouse
                 [
                     new RAWINPUTDEVICE
                     {
+                        // Generic Desktop
                         usUsagePage = 0x01,
+
+                        // Mouse
                         usUsage = 0x02,
 
+                        // Receive even when this window
+                        // does not have focus.
                         dwFlags =
                             RIDEV_INPUTSINK,
 
@@ -155,13 +232,46 @@ class RawMouse
             );
 
 
+
         Console.WriteLine(
             $"RawMouse={ok}"
         );
+
+
+        Console.WriteLine(
+            $"RawMouse HWND={window.Handle}"
+        );
+
+
+
+        if(!ok)
+        {
+            int error =
+                Marshal.GetLastWin32Error();
+
+
+            Console.WriteLine(
+                $"[RawMouse ERROR] RegisterRawInputDevices failed: {error}"
+            );
+
+
+            window.DestroyHandle();
+
+            window = null;
+
+            return;
+        }
+
+
+
+        started = true;
     }
 
 
 
+    // ============================================================
+    // Parse raw input
+    // ============================================================
 
     static void Parse(
         IntPtr lParam
@@ -170,33 +280,74 @@ class RawMouse
         uint size = 0;
 
 
-        GetRawInputData(
-            lParam,
-            RID_INPUT,
-            IntPtr.Zero,
-            ref size,
-            (uint)
-            Marshal.SizeOf<RAWINPUTHEADER>()
-        );
 
+        // --------------------------------------------------------
+        // Query required buffer size
+        // --------------------------------------------------------
 
-        IntPtr buffer =
-            Marshal.AllocHGlobal(
-                (int)size
-            );
-
-
-        try
-        {
+        uint result =
             GetRawInputData(
                 lParam,
                 RID_INPUT,
-                buffer,
+                IntPtr.Zero,
                 ref size,
                 (uint)
                 Marshal.SizeOf<RAWINPUTHEADER>()
             );
 
+
+
+        if(size == 0)
+        {
+            Console.WriteLine(
+                "[RawMouse] GetRawInputData returned zero size"
+            );
+
+            return;
+        }
+
+
+
+        IntPtr buffer =
+            Marshal.AllocHGlobal(
+                checked((int)size)
+            );
+
+
+
+        try
+        {
+            // ----------------------------------------------------
+            // Read raw input
+            // ----------------------------------------------------
+
+            uint read =
+                GetRawInputData(
+                    lParam,
+                    RID_INPUT,
+                    buffer,
+                    ref size,
+                    (uint)
+                    Marshal.SizeOf<RAWINPUTHEADER>()
+                );
+
+
+
+            if(read == 0 ||
+               read == uint.MaxValue)
+            {
+                Console.WriteLine(
+                    "[RawMouse] GetRawInputData failed"
+                );
+
+                return;
+            }
+
+
+
+            // ----------------------------------------------------
+            // Header
+            // ----------------------------------------------------
 
             RAWINPUTHEADER header =
                 Marshal.PtrToStructure<RAWINPUTHEADER>(
@@ -204,8 +355,18 @@ class RawMouse
                 );
 
 
+
             if(header.dwType != RIM_TYPEMOUSE)
                 return;
+
+
+
+            // ----------------------------------------------------
+            // Mouse data
+            // ----------------------------------------------------
+
+            int headerSize =
+                Marshal.SizeOf<RAWINPUTHEADER>();
 
 
 
@@ -213,24 +374,21 @@ class RawMouse
                 Marshal.PtrToStructure<RAWMOUSE>(
                     IntPtr.Add(
                         buffer,
-                        Marshal.SizeOf<RAWINPUTHEADER>()
+                        headerSize
                     )
                 );
 
 
 
-            // move
+            // ====================================================
+            // Movement
+            // ====================================================
 
             if(
                 mouse.lLastX != 0 ||
                 mouse.lLastY != 0
             )
             {
-                Console.WriteLine(
-                    $"MOVE {mouse.lLastX},{mouse.lLastY}"
-                );
-
-
                 OnMove?.Invoke(
                     mouse.lLastX,
                     mouse.lLastY
@@ -239,18 +397,24 @@ class RawMouse
 
 
 
-            // left button
+            // ====================================================
+            // Left button
+            // ====================================================
 
             if(
                 (mouse.usButtonFlags &
                 RI_MOUSE_LEFT_BUTTON_DOWN) != 0
             )
             {
+                leftDown = true;
+
+
                 OnButton?.Invoke(
                     1,
                     1
                 );
             }
+
 
 
             if(
@@ -258,6 +422,9 @@ class RawMouse
                 RI_MOUSE_LEFT_BUTTON_UP) != 0
             )
             {
+                leftDown = false;
+
+
                 OnButton?.Invoke(
                     1,
                     0
@@ -266,16 +433,16 @@ class RawMouse
 
 
 
-            // right button
+            // ====================================================
+            // Right button
+            // ====================================================
 
             if(
                 (mouse.usButtonFlags &
                 RI_MOUSE_RIGHT_BUTTON_DOWN) != 0
             )
             {
-                Console.WriteLine(
-                    "RIGHT DOWN"
-                );
+                rightDown = true;
 
 
                 OnButton?.Invoke(
@@ -285,14 +452,13 @@ class RawMouse
             }
 
 
+
             if(
                 (mouse.usButtonFlags &
                 RI_MOUSE_RIGHT_BUTTON_UP) != 0
             )
             {
-                Console.WriteLine(
-                    "RIGHT UP"
-                );
+                rightDown = false;
 
 
                 OnButton?.Invoke(
@@ -303,32 +469,34 @@ class RawMouse
 
 
 
-            // wheel
+            // ====================================================
+            // Wheel
+            // ====================================================
 
             if(
                 (mouse.usButtonFlags &
                 RI_MOUSE_WHEEL) != 0
             )
             {
-                short value =
-                    (short)
-                    mouse.usButtonData;
+                short wheelValue =
+                    unchecked(
+                        (short)
+                        mouse.usButtonData
+                    );
 
 
                 int delta =
-                    value / 120;
+                    wheelValue / 120;
 
 
-                Console.WriteLine(
-                    $"WHEEL {delta}"
-                );
 
-
-                OnWheel?.Invoke(
-                    delta
-                );
+                if(delta != 0)
+                {
+                    OnWheel?.Invoke(
+                        delta
+                    );
+                }
             }
-
         }
         finally
         {
@@ -340,9 +508,47 @@ class RawMouse
 
 
 
+    // ============================================================
+    // Reset mouse state
+    //
+    // We will use this later when fixing FocusWatcher.
+    // ============================================================
+
+    public static void ResetButtons()
+    {
+        if(leftDown)
+        {
+            leftDown = false;
+
+            OnButton?.Invoke(
+                1,
+                0
+            );
+        }
 
 
-    [DllImport("user32.dll")]
+
+        if(rightDown)
+        {
+            rightDown = false;
+
+            OnButton?.Invoke(
+                2,
+                0
+            );
+        }
+    }
+
+
+
+    // ============================================================
+    // Win32
+    // ============================================================
+
+    [DllImport(
+        "user32.dll",
+        SetLastError = true
+    )]
     static extern bool RegisterRawInputDevices(
         RAWINPUTDEVICE[] devices,
         uint count,
@@ -351,7 +557,10 @@ class RawMouse
 
 
 
-    [DllImport("user32.dll")]
+    [DllImport(
+        "user32.dll",
+        SetLastError = true
+    )]
     static extern uint GetRawInputData(
         IntPtr hRawInput,
         uint command,
